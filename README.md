@@ -8,8 +8,10 @@
 
 ## To be added soon:
 By 10/13
+
 1. DP 2D-King Mixture Signal + Uniform background (Slice Sampler)
 2. MFM 2D-King Mixture Signal + Uniform background (Slice Sampler ?)
 
 By 10/27:
+
 3. Added Mixture Model Signal + DP of splines
