@@ -14,3 +14,30 @@ softmax <- function(...){
   normx <- logx - max(logx)
   exp(normx) / sum(exp(normx))
 }
+
+get_KingComponent_example_init_pars = function(D) {
+  return(list(D = D, kappa0 = 1, nu0 = D + 2,
+              m0 = rep(0, D), Gamma0 = diag(D),
+              eta0 = 1, eta = 1.5))
+}
+
+get_IMVNComponent_example_init_pars = function(D) {
+  return(list(D = D, kappa0 = 1, nu0 = D + 2,
+              m0 = rep(0, D), s0.2 = 1))
+}
+
+get_GMVNComponent_example_init_pars = function(D) {
+  return(list(D = D, kappa0 = 1, nu0 = D + 2,
+              m0 = rep(0, D), S0 = diag(D)))
+}
+
+get_GMVNComponent_example_init_pars = function(D) {
+  kappa0 = 1
+  nu0 = D + 2
+  m0 <- rep(0, D)
+  S0 <- diag(D) 
+  L0 <- chol(S0 + kappa0 * outer(m0, m0))
+  
+  return(list(D = D, kappa0 = kappa0, nu0 = nu0,
+              m0 = m0, S0 = S0, L0 = L0))
+}

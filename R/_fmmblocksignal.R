@@ -1,4 +1,4 @@
-FMMSignal <- setRefClass("FMMSignal",
+FMMSignal <- setRefClass("FMMBlockSignal",
                        fields = list(
                          components = "list",
                          K = "integer",
@@ -27,6 +27,8 @@ FMMSignal <- setRefClass("FMMSignal",
                            X <<- X
                            
                            m0_inits <- kmeans(x = X, K)$centers
+                           m0_inits[1, ] = c(-20., 0)
+                           m0_inits[2, ] = c(20., 0)
                            
                            for(k in 1:K){
                              inik <- init_pars
@@ -49,19 +51,13 @@ FMMSignal <- setRefClass("FMMSignal",
                          },
                          add_signal = function(i) {
                            s[i] <<- 1
-                           k <- z[i]
-                           testthat::expect_true(k > 0)
-                           components[[k]]$add_sample(X[z==k,])
                          },
                          rm_signal = function(i) {
                            k <- z[i]
                            s[i] <<- 0
                            z[i] <<- 0
-                           
-                           testthat::expect_true(k > 0)
-                           components[[k]]$rm_sample(X[z==k,])
                          },
-                         gibbs_for_obs_i = function(i){
+                         sample_z_for_obs_i = function(i){
                            # remove point from old cluster
                            if(z[i] > 0) {
                              rm_signal(i)
@@ -78,10 +74,11 @@ FMMSignal <- setRefClass("FMMSignal",
                            # add point to new cluster
                            add_signal(i)
                          },
-                         gibbs = function(){
+                         collapsed_gibbs = function(){
+                           # sampling block z
                            for(i in 1:N_total){
                              if(s[i] == 1) {
-                               gibbs_for_obs_i(i)
+                               sample_z_for_obs_i(i)
                              } else {
                                # remove from consideration
                                if(z[i] > 0) {
@@ -89,6 +86,12 @@ FMMSignal <- setRefClass("FMMSignal",
                                }
                              }
                              
+                             # sample each cluster's parameters
+                             for(k in 1:K) {
+                               components[[k]]$block_update(X[z == k,])
+                             }
+                             
+                             # sample mixing weight
                              update_w()
                            }
                            testthat::expect_equal(sum(z != 0), sum(s == 1))

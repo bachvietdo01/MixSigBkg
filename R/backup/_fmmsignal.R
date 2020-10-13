@@ -61,7 +61,7 @@ FMMSignal <- setRefClass("FMMSignal",
                            testthat::expect_true(k > 0)
                            components[[k]]$rm_sample(X[z==k,])
                          },
-                         gibbs_for_obs_i = function(i){
+                         collapsed_gibbs_for_obs_i = function(i){
                            # remove point from old cluster
                            if(z[i] > 0) {
                              rm_signal(i)
@@ -78,10 +78,10 @@ FMMSignal <- setRefClass("FMMSignal",
                            # add point to new cluster
                            add_signal(i)
                          },
-                         gibbs = function(){
+                         collapsed_gibbs = function(){
                            for(i in 1:N_total){
                              if(s[i] == 1) {
-                               gibbs_for_obs_i(i)
+                               collapsed_gibbs_for_obs_i(i)
                              } else {
                                # remove from consideration
                                if(z[i] > 0) {

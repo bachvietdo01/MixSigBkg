@@ -1,47 +1,43 @@
 MFMSignal <- setRefClass("MFMSignal",
                        fields = list(
-                         sig_components = "list",
+                         components = "list",
                          K = "integer",
                          D = "integer",
                          X = "matrix",
                          init_pars = "list",
                          z = "numeric",
                          s = "numeric",
-                         kappa0 = "numeric",
-                         nu0 = "numeric",
-                         m0 = "numeric",
-                         L0 = "matrix",
-                         S0 = "matrix",
                          alpha = "numeric",
                          N_total = "integer",
                          w = "numeric",
+                         m0 = "numeric",
+                         kappa0 = "numeric",
+                         nu0 = "numeric",
+                         S0 = "matrix",
+                         L0 = "matrix",
                          log_V_n = "numeric"),
 
                        methods = list(
                          initialize = function(K, D, X, z, s, 
-                                               kappa0 = 1.0, 
-                                               nu0 = D+2, 
-                                               m0 = rep(0, D), 
-                                               S0 = diag(rep(1, D)), 
-                                               alpha = 0.1,
-                                               alpha0 = 0.5){
+                                               init_pars, 
+                                               alpha = 0.1){
                            K <<- as.integer(K)
                            D <<- as.integer(D)
                            N_total <<- nrow(X)
                            s <<- s
                            z <<- z
                            X <<- X
-
-                           alpha <<- alpha
-                           kappa0 <<- kappa0
-                           nu0 <<- nu0
-                           m0 <<- m0
-                           S0 <<- S0
+                           
+                           init_pars <<-init_pars
+                           kappa0 <<- init_pars$kappa0
+                           nu0 <<- init_pars$nu0
+                           m0 <<- init_pars$m0
+                           S0 <<- init_pars$S0
                            L0 <<- chol(S0 + kappa0 * outer(m0, m0))
 
-                           init_pars <<- list(D = D, kappa0 = kappa0, nu0 = nu0, m0 = m0, S0 = S0, L0 = L0)
+                           alpha <<- alpha
                            for(k in 1:K){
-                             sig_components[[k]] <<- GMVNComponent$new(init_pars, X = X[z == k, , drop=FALSE])
+                             components[[k]] <<- GMVNComponent$new(init_pars, X = X[z == k, , drop=FALSE])
                             }
                            
                            w <<- rep(1/K, K)
@@ -56,26 +52,10 @@ MFMSignal <- setRefClass("MFMSignal",
                            
                            for(k in 1:K) {
                              w_k <- w[k]
-                             log_sig_probs[k] <- log(w_k) + sig_components[[k]]$get_loglik(x)
+                             log_sig_probs[k] <- log(w_k) + components[[k]]$get_loglik(x)
                            }
                            
                            return(matrixStats::logSumExp(log_sig_probs))
-                         },
-                         update_X = function(X){
-                           # given a new X value, but conditioning on the current clustering z,
-                           # we need to update m and L for each component
-                           # (the rest will remain constant)
-                           X <<- X
-                           for(k in 1:K){
-                             X_k <- X[z == k, , drop=FALSE]
-                             N_k <- sum(z == k)
-                             kappa_k <- (kappa0 + N_k)
-                             m_k <- (kappa0 * m0 + colSums(X_k)) / kappa_k
-                             S_k <- S0 + kappa0 * outer(m0, m0) + t(X_k) %*% X_k
-                             sig_components[[k]]$m <<- m_k
-                             sig_components[[k]]$L <<- chol(S_k - kappa_k * outer(m_k, m_k))
-                             sig_components[[k]]$S <<- S_k
-                           }
                          },
                          update_w = function() {
                            cnt_z <- rep(0, K)
@@ -88,43 +68,43 @@ MFMSignal <- setRefClass("MFMSignal",
                            x <- X[i, ]
                            z[i] <<- k
                            if(k > K){
-                             new_sig_component()
+                             new_component()
                            }
                            
-                           sig_components[[k]]$add_sample(x)
+                           components[[k]]$add_sample(x)
                          },
                          rm_signal = function(i){
                            x <- X[i, ]
                            k <- z[i]
                            
-                           sig_components[[k]]$rm_sample(x)
+                           components[[k]]$rm_sample(x)
                            
-                           if(sig_components[[k]]$is_empty()){
-                             rm_sig_component(k)
+                           if(components[[k]]$is_empty()){
+                             rm_component(k)
                            }
                          },
-                         new_sig_component = function(which_ind = NULL){
+                         new_component = function(which_ind = NULL){
                            K <<- K + 1L
                            if(is.null(which_ind)){
-                             sig_components[[K]] <<- SignalComponent$new(init_pars)
+                             components[[K]] <<- GMVNComponent$new(init_pars)
                            }else{
-                             sig_components[[K]] <<- SignalComponent$new(init_pars, X = X[which_ind, , drop=FALSE])
+                             components[[K]] <<- GMVNComponent$new(init_pars, X = X[which_ind, , drop=FALSE])
                              z[which_ind] <<- K
                            }
                          },
-                         rm_sig_component = function(k){
-                           sig_components[[k]] <<- NULL
+                         rm_component = function(k){
+                           components[[k]] <<- NULL
                            K <<- K - 1L
                            # update the cluster numbers
                            z <<- ifelse(z > k, z-1L, z)
                          },
-                         signal_collapsed_gibbs_for_obs_i = function(i){
+                         gibbs_for_obs_i = function(i){
                            x <- X[i, ]
                            logprobs <- rep(0, K+1)
                            # for existing clusters
                            for(k in 1:K){
                              logprior <- log(sum(z[-i] == k) + alpha)
-                             loglik <- sig_components[[k]]$posterior_predictive(x)
+                             loglik <- components[[k]]$posterior_predictive(x)
                              logprobs[k] <- logprior + loglik
                              # cat("k", k, "logprior", logprior, "loglik", loglik, "\n")
                            }
@@ -140,11 +120,11 @@ MFMSignal <- setRefClass("MFMSignal",
                            k0 = base::sample(1:(K+1), 1, prob = softmax(logprobs))
                            k0
                          },
-                         collapsed_gibbs = function(){
+                         gibbs = function(){
                            for(i in 1:N_total){
                              # add signal
                              if(s[i] == 1) {
-                               k0 <- signal_collapsed_gibbs_for_obs_i(i)
+                               k0 <- gibbs_for_obs_i(i)
                                add_signal(i, k0)
                              } else {
                                if(z[i] != 0) {
@@ -167,7 +147,7 @@ MFMSignal <- setRefClass("MFMSignal",
                              testthat::expect_true(z[j] != 0)
                              
                              if(z[i] == z[j]){
-                               propose_split(i, j, sig_components[[z[i]]])
+                               propose_split(i, j, components[[z[i]]])
                              } else{
                                propose_merge(i, j)
                              }
@@ -176,8 +156,8 @@ MFMSignal <- setRefClass("MFMSignal",
                            }
                          },
                          propose_split = function(i, j, S_current){
-                           S_i <- SignalComponent$new(init_pars)
-                           S_j <- SignalComponent$new(init_pars)
+                           S_i <- GMVNComponent$new(init_pars)
+                           S_j <- GMVNComponent$new(init_pars)
                            S_i$add_sample(X[i, ])
                            S_j$add_sample(X[j, ])
                            S_ind <- which(z %in% c(z[i], z[j]))
@@ -214,11 +194,11 @@ MFMSignal <- setRefClass("MFMSignal",
                            # accept or reject the constructed proposal
                            if(runif(1) < exp(MH_logratio)){
                              # cat("accepted split cluster", z[i], "with prob", exp(MH_logratio), "\n")
-                             rm_sig_component(z[i])
+                             rm_component(z[i])
                              # cat("splitting elements", S_ind, "into", S_ind[temp_z == 1L], "and", S_ind[temp_z == 2L], "\n")
                              # new_component(which_ind = which(temp_z == 1L))
-                             sig_components[[K+1]] <<- S_i
-                             sig_components[[K+2]] <<- S_j
+                             components[[K+1]] <<- S_i
+                             components[[K+2]] <<- S_j
                              z[temp_z == 1L] <<- K+1L
                              z[temp_z == 2L] <<- K+2L
                              K <<- K + 2L
@@ -228,9 +208,9 @@ MFMSignal <- setRefClass("MFMSignal",
                          },
                          propose_merge = function(i, j){
                            S_ind <- which(z %in% c(z[i], z[j]))
-                           S_merged <- SignalComponent$new(init_pars, X = X[S_ind, , drop=FALSE])
-                           S_i <- SignalComponent$new(init_pars)
-                           S_j <- SignalComponent$new(init_pars)
+                           S_merged <- GMVNComponent$new(init_pars, X = X[S_ind, , drop=FALSE])
+                           S_i <- GMVNComponent$new(init_pars)
+                           S_j <- GMVNComponent$new(init_pars)
                            S_i$add_sample(X[i, ])
                            S_j$add_sample(X[j, ])
                            MH_logratio <- 0
@@ -258,22 +238,22 @@ MFMSignal <- setRefClass("MFMSignal",
                            MH_logratio <- MH_logratio + logprob_proposed - logprob_current - log(alpha) - lgamma(S_i$N) - lgamma(S_j$N) + lgamma(S_i$N + S_j$N)
                            if(runif(1) < exp(MH_logratio)){
                              # cat("accepted merge with prob", exp(MH_logratio), "\n")
-                             rm_sig_component(z[i])
-                             rm_sig_component(z[j])
-                             new_sig_component(which_ind = S_ind)
+                             rm_component(z[i])
+                             rm_component(z[j])
+                             new_component(which_ind = S_ind)
                            }
                            rm(S_i, S_j, S_merged)
                          },
                          generate_sample = function(n){
-                           cluster_probs <- sapply(sig_components, function(x)x$N)
+                           cluster_probs <- sapply(components, function(x)x$N)
                            cluster_allocations <- base::sample(1:K, n, replace=T, prob = cluster_probs)
                            out <- matrix(0, n, D)
                            # for all existing clusters
                            mu_list <- list()
                            Sigma_list <- list()
                            for(k in 1:K){
-                             Sigma_list[[k]] <- sig_components[[k]]$Sigma
-                             mu_list[[k]] <- sig_components[[k]]$mu
+                             Sigma_list[[k]] <- components[[k]]$Sigma
+                             mu_list[[k]] <- components[[k]]$mu
                              subset <- (cluster_allocations == k)
                              if(sum(subset) > 0){
                                out[subset, ] <- mvtnorm::rmvnorm(sum(subset), mean = mu_list[[k]], sigma = Sigma_list[[k]])
@@ -296,18 +276,18 @@ MFMSignal <- setRefClass("MFMSignal",
                            cstar <- unique(zs)
                            
                            # store index of old cluster numbers
-                           old_sig_comps <- sig_components
+                           old_sig_comps <- components
                            idx = list()
                            for(c in cstar) {
                              idx[[c]] <- (z == c)
                            }
                            
                            # reassign cluster numbers
-                           sig_components <<- list()
+                           components <<- list()
                            K <<- length(cstar)
                            k <- 1
                            for(c in cstar) {
-                             sig_components[[k]] <<- old_sig_comps[[c]]
+                             components[[k]] <<- old_sig_comps[[c]]
                              z[idx[[c]]] <<- rep(k, sum(idx[[c]]))
                              k = k + 1
                            }
@@ -323,7 +303,7 @@ MFMSignal <- setRefClass("MFMSignal",
                              m_k <- (kappa0*m0 + colSums(X_k)) / kappa_k
                              S_k <- S0 + t(X_k) %*% X_k
                              L_k <- chol(S_k - kappa_k * outer(m_k, m_k))
-                             testthat::expect_equal(L_k, sig_components[[k]]$L)
+                             testthat::expect_equal(L_k, components[[k]]$L)
                            }
                          },
                          plot = function(){
@@ -340,8 +320,8 @@ MFMSignal <- setRefClass("MFMSignal",
                            Sigma_list <- list()
                            
                            for(k in 1:K){
-                             Sigma_list[[k]] <- sig_components[[k]]$Sigma
-                             mu_list[[k]] <- sig_components[[k]]$mu
+                             Sigma_list[[k]] <- components[[k]]$Sigma
+                             mu_list[[k]] <- components[[k]]$mu
                            }
                            plot_mixture(mu_list, Sigma_list, X, z)
                          }

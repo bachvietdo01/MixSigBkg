@@ -29,7 +29,7 @@ GMVNComponent <- setRefClass("GMVNComponent",
                                    nu <<- nu0
                                    m <<- m0
                                    L <<- L0
-                                   S <<- diag(D)
+                                   S <<- diag(D) # ???: wrong
                                    
                                    if(!is.null(X)){
                                      N_k <- nrow(X)
@@ -140,8 +140,6 @@ IMVNComponent <- setRefClass("IMVNComponent",
                                    m0 <<- init_pars$m0
                                    s0.2 <<- init_pars$s0.2
                                    
-                                   print(init_pars)
-                                   
                                    N <<- 0L
                                    kappa <<- kappa0
                                    nu <<- nu0
@@ -205,3 +203,174 @@ IMVNComponent <- setRefClass("IMVNComponent",
                                    mu <<- as.numeric(mvtnorm::rmvnorm(1, mean = m, sigma = tau /kappa * diag(D)))
                                  }
                                ))
+
+KingComponent <- setRefClass("KingComponent",
+                             fields = list(
+                               N = "integer",
+                               D = "integer",
+                               mu = "numeric",
+                               S.L = "matrix",
+                               Sigma.L = "matrix",
+                               Psi = "matrix",
+                               Sigma = "matrix",
+                               eta = "numeric",
+                               m = "numeric",
+                               kappa = "numeric",
+                               nu = "numeric",
+                               S = "matrix",
+                               S.L0 = "matrix",
+                               m0 = "numeric",
+                               kappa0 = "numeric",
+                               nu0 = "numeric",
+                               eta0 = "numeric",
+                               Gamma0 = "matrix"),
+                             methods = list(
+                               initialize = function(init_pars, X = NULL){
+                                 D <<- as.integer(init_pars$D)
+                                 
+                                 eta <<- init_pars$eta
+                                 eta0 <<- init_pars$eta0
+                                 Gamma0 <<- init_pars$Gamma0
+                                 
+                                 m0 <<- init_pars$m0
+                                 kappa0 <<- init_pars$kappa0
+                                 nu0 <<- 2 * init_pars$eta - 1
+                                 
+                                 Sigma.L <<- CholWishart::rCholWishart(1, nu0, Gamma0)[,,1]
+                                 Sigma <<- t(Sigma.L) %*% Sigma.L
+                                 
+                                 S <<-Sigma
+                                 S.L0 <<- chol(S + kappa0 * outer(m0, m0))
+                                 
+                                 N <<- 0L
+                                 kappa <<- kappa0
+                                 nu <<- nu0
+                                 m <<- m0
+                                 
+                                 if(!is.null(X)){
+                                   N_k <- nrow(X)
+                                   kappa_k <- kappa + N_k
+                                   m_k <- (kappa*m + colSums(X)) / kappa_k
+                                   S_k <- S + kappa * outer(m, m) + t(X) %*% X
+                                   S.L <<- chol(S_k - kappa_k * outer(m_k, m_k))
+                                   
+                                   if(any(is.nan(S.L))) stop("init problem")
+                                   
+                                   N <<- N + N_k
+                                   nu <<- nu + N_k
+                                   kappa <<- kappa_k
+                                   m <<- m_k
+                                   S <<- S_k
+                                 }
+                                 
+                                 update_King_pars()
+                               },
+                               is_empty = function(){
+                                 ifelse(N == 0, TRUE, FALSE)
+                               },
+                               add_sample = function(Xk){
+                                 block_update(Xk)
+                               },
+                               rm_sample = function(Xk){
+                                 block_update(Xk)
+                               },
+                               block_update = function(Xk) {
+                                 N <<- 0L
+                                 kappa <<- kappa0
+                                 nu <<- nu0
+                                 m <<- m0
+                                 
+                                 S <<- Sigma
+                                
+                                 N_k <- nrow(Xk)
+                                 kappa_k <- kappa + N_k
+                                 m_k <- (kappa*m + colSums(Xk)) / kappa_k
+                                 S_k <- S + kappa * outer(m, m) + t(Xk) %*% Xk
+                                 S.L <<- chol(S_k - kappa_k * outer(m_k, m_k))
+                                 
+                                 if(any(is.nan(S.L))) stop("init problem")
+                                 
+                                 N <<- N + N_k
+                                 nu <<- nu + N_k
+                                 kappa <<- kappa_k
+                                 m <<- m_k
+                                 S <<- S_k
+                                 
+                                 update_King_pars()
+                               },
+                               # add_sample = function(x){
+                               #   kappa <<- kappa + 1L
+                               #   m <<- ((kappa - 1)*m + x) / kappa
+                               #   
+                               #   nu <<- nu + 1L
+                               #   S.L <<- chol_update(S.L, sqrt(kappa/(kappa - 1)) * (x - m))
+                               #   
+                               #   if(any(is.nan(S.L))) stop("Add sample")
+                               #   
+                               #   N <<- N + 1L
+                               #   S <<- t(S.L) %*% S.L
+                               #   
+                               #   Sigma_old <- Sigma
+                               #   # get new mu, Sigma, Psi
+                               #   update_King_pars()
+                               #   
+                               #   # update S for new iteration
+                               #   S <<- S - Sigma_old + Sigma
+                               #   S.L <<- chol(S)
+                               #   if(any(is.nan(S.L))){
+                               #     stop("add sample")
+                               #   }
+                               # },
+                               # rm_sample = function(x){
+                               #   S.L <<- chol_downdate(S.L, sqrt(kappa/(kappa - 1)) * (x - m))
+                               #   if(any(is.nan(S.L))){
+                               #     stop("Rm sample")
+                               #   }
+                               #   kappa <<- kappa - 1L
+                               #   m <<- ((kappa + 1)*m - x) / kappa
+                               #   nu <<- nu - 1L
+                               #   N <<- N - 1L
+                               #   S <<- t(S.L) %*% S.L
+                               #   #S <<- S - outer(x, x)
+                               #   #testthat::expect_equal(chol(S - kappa * outer(m, m)), L)
+                               #   # if(mean(abs(chol(S - kappa * outer(m, m)) - L)) > 1e-5) stop("We have a problem")
+                               #   
+                               #   Sigma_old <- Sigma
+                               #   # get new mu, Sigma, Psi
+                               #   update_King_pars()
+                               #   S <<- S - Sigma_old + Sigma
+                               #   S.L <<- chol(S)
+                               #   if(any(is.nan(S.L))){
+                               #     stop("rm sample")
+                               #   }
+                               # },
+                               get_cholS = function(){
+                                 # subtracts the cluster means from the covariance matrix
+                                 # and returns Cholesky decomposition
+                                 # LL <- chol(S - kappa * outer(m, m))
+                                 return(S.L)
+                               },
+                               get_S = function(){
+                                 #S - kappa * outer(m, m)
+                                 return(t(S.L) %*% S.L)
+                               },
+                               get_loglik = function(x) {
+                                 return(mvtnorm::dmvnorm(x, mean = mu, sigma = Psi, log = TRUE))
+                               },
+                               update_King_pars = function(){
+                                 Psi <<- CholWishart::rInvWishart(1, nu, S)[,,1]
+                                 if(any(is.nan(Psi))){
+                                   stop("Stop update king pars")
+                                 }
+                                 mu <<- as.numeric(mvtnorm::rmvnorm(1, mean = m, sigma = 1/kappa * Psi))
+                                 mu <<- m0
+                                 
+                                 # update Sigma
+                                 Gamma <- Gamma0 - Gamma0 %*% solve(Psi + Gamma0) %*% Gamma0
+                                 Sigma.L <<- CholWishart::rCholWishart(1, 2 * eta - 1 + eta0, Gamma)[,,1]
+                                 if(any(is.nan(Sigma.L))){
+                                   stop("Stop update king pars")
+                                 }
+                                 Sigma <<- t(Sigma.L) %*% Sigma.L
+                               }
+                             ))
